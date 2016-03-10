@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # Implementation of HMM for sonnet generation
 import numpy as np
-ZERO = 1e-7
+ZERO = 1e-7                     # add to everything to make sure no log(0)'s
+STARTSTATE = ''                 # start state
+EOL = '\n'
 def parseFile(FN, delim=" "):
     """
     Takes a filename and parses into (set, list) tuple. Simplest tokenization
@@ -11,10 +13,8 @@ def parseFile(FN, delim=" "):
         set - set of tokens in file
         list - list of tokenized inputs; each line assumed to be one input
     """
-    startstate = ''                 # start state
-    EOL = '\n'
     tokens = set()
-    tokens.add(startstate)
+    tokens.add(STARTSTATE)
     tokenlist = list()
     f = open(FN, 'r')
     for l in f.readlines():
@@ -22,7 +22,7 @@ def parseFile(FN, delim=" "):
         for i in line:
             tokens.add(i.strip())
         tokens.add(EOL)         # manually add EOL since dropped by strip
-        tokenlist.append([startstate] + 
+        tokenlist.append([STARTSTATE] + 
                 [i.strip() for i in line] + 
                 [EOL])
     return tokens, tokenlist
@@ -85,7 +85,7 @@ class HMM(object):
         if A is None:
             self.A = np.zeros([self.k, self.k]) + 1.0 / self.k
         else:
-            self.A = A
+            self.A = A + max(0, ZERO - A.min())
     def setO(self, O = None):
         """
         sets O matrix, k * k (if passed None, sets to 1/k)
@@ -93,7 +93,7 @@ class HMM(object):
         if O is None:
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
         else:
-            self.O = O
+            self.O = O + max(0, ZERO - A.min())
     def predict(self, startindex=0, endindex=-1, log=False, max_iters=10):
         """
         Runs Viterbi and predicts max sequence

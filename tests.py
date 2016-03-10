@@ -32,12 +32,12 @@ if __name__ == '__main__':
         [[0, 0.51, 0.49, 0],
             [0, 0.1, 0.9, 0],
             [0, 0.9, 0.1, 0],
-            [0, 0, 0, 1]]) + ZERO) # four states are ['', '0', '1', '\n']
+            [0, 0, 0, 1]]) + ZERO) # four states are [STARTSTATE, '0', '1', EOL]
     O = np.zeros([k + 2, len(totoken.keys())]) + ZERO
-    O[fromtoken[''], 0] = 1
+    O[fromtoken[STARTSTATE], 0] = 1
     O[fromtoken['0'], 1] = 1
     O[fromtoken['1'], 2] = 1
-    O[fromtoken['\n'], 3] = 1       # each state just emits itself
+    O[fromtoken[EOL], 3] = 1       # each state just emits itself
     testHMM.setO(O)
     prob, seq = testHMM.predict()
     problog, seqlog = testHMM.predict(log=True)
