@@ -4,7 +4,7 @@ import numpy as np
 ZERO = 1e-323                   # add to everything to make sure no log(0)'s
 STARTSTATE = ''                 # start state
 EOL = '\n'
-import random, bisect           # for random prediction
+import bisect                   # for random prediction
 import math                     # math.isnan()
 def parseFile(FN, delim=" "):
     """
@@ -92,6 +92,12 @@ class HMM(object):
             endtrans[-1] = 1
             self.A[0] = 0
             self.A[:, -1] = endtrans
+            # randomly vary A small-ly while preserving sum(columns) = 1
+            # break degeneracies (observed some in testing)
+            for i in range(1, self.k - 1):
+                randarr = np.random.rand(self.k - 1) / 1000
+                randarr -= randarr.mean()
+                self.A[1: , i] += randarr
         else:
             self.A = np.array(A) + max(0, ZERO - A.min())
     def setO(self, O = None):
@@ -107,6 +113,12 @@ class HMM(object):
             endemis[self.fromtoken[EOL]] = 1
             self.O[:, 0] = startemis
             self.O[:, -1] = endemis
+            # randomly vary A small-ly while preserving sum(columns) = 1
+            # break degeneracies (observed some in testing)
+            for i in range(1, self.N - 2):
+                randarr = np.random.rand(self.k) / 1000
+                randarr -= randarr.mean()
+                self.O[: , i] += randarr
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
     def predict(self, max_iters=-1,
@@ -166,7 +178,7 @@ class HMM(object):
                 if rand == False:
                     index = probabilities.argmax()  # argmax_i P(i -> j)
                 else:
-                    r = random.random() * sumProbs[-1]
+                    r = np.random.rand() * sumProbs[-1]
                     if all(np.array(sumProbs) == 0):
                         index = 0
                     else:
