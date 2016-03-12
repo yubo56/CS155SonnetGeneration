@@ -84,37 +84,51 @@ class HMM(object):
     def setA(self, A = None):
         """
         sets A matrix, k * k (if passed None, sets to 1/k)
+        forbid transitions out of end state, into start state
         """
         if A is None:
-            self.A = np.zeros([self.k, self.k]) + 1.0 / self.k
+            self.A = np.zeros([self.k, self.k]) + 1.0 / (self.k - 1)
+            endtrans = np.zeros(self.k) + ZERO
+            endtrans[-1] = 1
+            self.A[0] = 0
+            self.A[:, -1] = endtrans
         else:
             self.A = np.array(A) + max(0, ZERO - A.min())
     def setO(self, O = None):
         """
         sets O matrix, k * N (if passed None, sets to 1/k)
+        start state is k=0, end state is k=-1, must have fixed emission
+        probabilities
         """
         if O is None:
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
+            startemis = np.array([1] + [ZERO] * (self.k - 1))
+            endemis = np.zeros(self.k) + ZERO
+            endemis[self.fromtoken[EOL]] = 1
+            self.O[:, 0] = startemis
+            self.O[:, -1] = endemis
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
-    def predict(self, startindex=0, endindex=-1, max_iters=-1,
-            multiplier=None, rand=False):
+    def predict(self, max_iters=-1,
+            multiplier=None, rand=False, retl=False):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
         Inputs:
-            int startindex  - index of start state, default 0
-            int endindex    - index of end state, default -1
             int max_iters   - max number of tokens to predict before truncating
                                 Default: -1 (no truncation)
             list(float)     - external probability multiplier on tokens
                 multiplier      (possibly from other HMMs). Default: all 1s
             bool rand       - make random choices per probability distribution
                                 instead of random weights
+            bool retl       - whether to return log-likelihood. Default False
         Outputs:
             float           - probability
             list(int)       - maximum probability sequence, in state number
         """
+        startindex = 0
+        endindex = self.k - 1
+
         if self.A is None or self.O is None:
             raise ValueError("A or O is None")
         if multiplier is None:
@@ -134,7 +148,8 @@ class HMM(object):
         tot_likelihoods[0] = np.log(tot_likelihoods[0])
 
         it = 0 # most natural way for -1 = infinite loop is this
-        while it != max_iters:
+        maxpath = paths[0]
+        while it != max_iters and maxpath[-1] != self.k - 1:
             likelihoods = np.zeros(self.k)
             newpaths = list([0] * self.k)  
             for j in range(self.k):
@@ -162,8 +177,22 @@ class HMM(object):
             tot_likelihoods.append(likelihoods)
             paths = newpaths
             it += 1
-        index = tot_likelihoods[-1].argmax()
-        return tot_likelihoods[-1][index], paths[index]
+            index = tot_likelihoods[-1].argmax()
+            maxpath = paths[index]
+        # this abstraction is a bit ugly since multiple states can emit EOL
+        # characters...
+        if retl:
+            return tot_likelihoods[-1][index], maxpath if endindex not in maxpath\
+                    else maxpath[ : maxpath.index(endindex) + 1]
+        else:
+            return maxpath if endindex not in maxpath else \
+                    maxpath[ : maxpath.index(endindex) + 1]
+    def totokens(self, s):
+        """
+        turns a sequence of labels into tokens using self.totoken
+        """
+        # do not convert start state
+        return " ".join([self.totoken[c] for c in s[1: ]])
     def calcA(self, seq):
         """
         computes alpha values
