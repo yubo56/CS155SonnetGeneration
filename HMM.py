@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # Implementation of HMM for sonnet generation
 import numpy as np
-ZERO = 1e-7                     # add to everything to make sure no log(0)'s
+ZERO = 1e-323                   # add to everything to make sure no log(0)'s
 STARTSTATE = ''                 # start state
 EOL = '\n'
 def parseFile(FN, delim=" "):
@@ -65,6 +65,7 @@ class HMM(object):
         int k       - Number hidden states (default 5)
         float lamb  - Regularization (default 0)
         nparray A   - k * k transition matrix (default 1/k everything)
+                    - FROM second index TO first index (columns sum to 1)
         nparray O   - k * N emission matrix (default 1/k everything)
         fromtoken   - dict from tokens to indicies
         totoken     - dict from indicies to tokens
@@ -85,17 +86,17 @@ class HMM(object):
         if A is None:
             self.A = np.zeros([self.k, self.k]) + 1.0 / self.k
         else:
-            self.A = A + max(0, ZERO - self.A.min())
+            self.A = np.array(A) + max(0, ZERO - self.A.min())
     def setO(self, O = None):
         """
-        sets O matrix, k * k (if passed None, sets to 1/k)
+        sets O matrix, k * N (if passed None, sets to 1/k)
         """
         if O is None:
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
         else:
-            self.O = O + max(0, ZERO - self.O.min())
+            self.O = np.array(O) + max(0, ZERO - self.O.min())
     def predict(self, startindex=0, endindex=-1, log=False, max_iters=10,
-            multiplier=None):
+            multiplier=None, renorm=True):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
@@ -107,7 +108,9 @@ class HMM(object):
             bool log        - use log probabilities
             int max_iters   - max number of tokens to predict before truncating
             list(float)     - external probability multiplier on tokens
-                                (possibly from other HMMs). Default: all 1s
+                multiplier      (possibly from other HMMs). Default: all 1s
+            bool renorm     - whether to renormalize likelihoods at each step
+                                only relevant when not using log probs
         Outputs:
             float           - probability
             list(int)       - maximum probability sequence, in state number
@@ -136,17 +139,99 @@ class HMM(object):
             for j in range(self.k):
                 # prob transition from i into j
                 if log == True:
-                    probabilities = np.add(np.transpose(np.log(self.A))[j], 
+                    probabilities = np.add(np.log(self.A)[j], 
                             log_likelihoods[-1]) + np.log(multiplier[j])
                 else:
-                    probabilities = np.multiply(np.transpose(self.A)[j], 
+                    probabilities = np.multiply(self.A[j], 
                             log_likelihoods[-1]) * multiplier[j]
                 index = probabilities.argmax()  # argmax_i P(i -> j)
                 # store likelihood, path for maximum
                 likelihoods[j] = probabilities[index]
                 newpaths[j] = paths[index] + [j]
-            log_likelihoods.append(likelihoods)
+            if log == True:
+                log_likelihoods.append(likelihoods)
+            else:
+                log_likelihoods.append(likelihoods / sum(likelihoods))
             paths = newpaths
-            # print(log_likelihoods[-1], paths)
         index = log_likelihoods[-1].argmax()
         return log_likelihoods[-1][index], paths[index]
+    def calcA(self, seq):
+        """
+        computes alpha values
+        Each column of alpha is normalized since it only makes sense this way
+        Input:
+            seq - M-length input sequence, already fromtoken'd
+        Output:
+            a   - M x k alpha values
+        """
+        M = len(seq)
+        k = self.k
+        a = np.zeros([M, k])
+        a[0, seq[0]] = 1
+        for z in range(1, M):
+            a[z] = np.multiply(self.O[:, seq[z]],
+                    np.dot(self.A, a[z-1]))
+            a[z] /= a[z].sum()
+        return a
+    def calcB(self, seq):
+        """
+        computes beta values
+        Each column of beta is normalized since it only makes sense this way
+        Input:
+            seq - M-length input sequence, already fromtoken'd
+        Output:
+            b   - M x k beta values
+        """
+        M = len(seq)
+        k = self.k
+        b = np.zeros([M, k])
+        b[-1, -1] = 1          # start B at end state
+        for z in range(1, M):
+            b[-z - 1] = np.dot(np.transpose(self.A), 
+                    np.multiply(self.O[:, seq[-z]],b[-z]))
+            b[-z - 1] /= b[-z - 1].sum()
+        return b
+    def EM(self, seq):
+        """
+        performs expectation-maximization
+        Input:
+            seq - M-length input sequence, already fromtoken'd
+        Output:
+            resA, resO - Frobenius norms of newA - A, newO - O
+        """
+        A = np.zeros(self.A.shape)
+        O = np.zeros(self.O.shape)
+        alpha = self.calcA(seq)
+        beta = self.calcB(seq)
+
+        # O update rule
+        for state in range(self.k):
+            for token in range(self.N):
+                num = 0
+                den = 0
+                for i, z in enumerate(seq):
+                    marginal = alpha[i, state] * beta[i, state] /\
+                            np.dot(alpha[i], beta[i])
+                    if z == token:
+                        num += marginal
+                    den += marginal
+                O[state, token] = num / den
+        # A update rule
+        for state1 in range(self.k):
+            for state2 in range(self.k):
+                num = 0
+                den = 0
+                for i, z in enumerate(seq[1:]):
+                    # num is properly normalized, sums to 1 over states
+                    num += alpha[i, state1] * beta[i + 1, state2] * \
+                            self.A[state2, state1] * self.O[state2, z] / \
+                            np.dot(np.dot(self.A, alpha[i]), np.multiply(
+                                beta[i + 1], np.transpose(self.O)[z]))
+                    den += alpha[i, state1] * beta[i, state1] /\
+                            np.dot(alpha[i], beta[i])
+                A[state2, state1] = num / den
+        resA = np.sqrt(((self.A - A)**2).sum())
+        resO = np.sqrt(((self.O - O)**2).sum())
+        self.A = A
+        self.O = O
+        return resA, resO
