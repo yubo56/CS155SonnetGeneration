@@ -4,6 +4,8 @@ import numpy as np
 ZERO = 1e-323                   # add to everything to make sure no log(0)'s
 STARTSTATE = ''                 # start state
 EOL = '\n'
+import random, bisect           # for random prediction
+import math                     # math.isnan()
 def parseFile(FN, delim=" "):
     """
     Takes a filename and parses into (set, list) tuple. Simplest tokenization
@@ -86,7 +88,7 @@ class HMM(object):
         if A is None:
             self.A = np.zeros([self.k, self.k]) + 1.0 / self.k
         else:
-            self.A = np.array(A) + max(0, ZERO - self.A.min())
+            self.A = np.array(A) + max(0, ZERO - A.min())
     def setO(self, O = None):
         """
         sets O matrix, k * N (if passed None, sets to 1/k)
@@ -94,23 +96,26 @@ class HMM(object):
         if O is None:
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
         else:
-            self.O = np.array(O) + max(0, ZERO - self.O.min())
-    def predict(self, startindex=0, endindex=-1, log=False, max_iters=10,
-            multiplier=None, renorm=True):
+            self.O = np.array(O) + max(0, ZERO - O.min())
+    def predict(self, startindex=0, endindex=-1, log=False, max_iters=-1,
+            multiplier=None, renorm=False, rand=False):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
         Inputs:
             int startindex  - index of start state, default 0
             int endindex    - index of end state, default -1
-            func agg        - function to aggregate, default np.add (log
-                likelihoods)
-            bool log        - use log probabilities
+            bool log        - use log probabilities to stop overflow
+                                Note: Not very useful if use renorm=True, same
+                                effect
             int max_iters   - max number of tokens to predict before truncating
+                                Default: -1 (no truncation)
             list(float)     - external probability multiplier on tokens
                 multiplier      (possibly from other HMMs). Default: all 1s
             bool renorm     - whether to renormalize likelihoods at each step
                                 only relevant when not using log probs
+            bool rand       - make random choices per probability distribution
+                                instead of random weights
         Outputs:
             float           - probability
             list(int)       - maximum probability sequence, in state number
@@ -133,26 +138,55 @@ class HMM(object):
                                             # first
         if log == True:
             log_likelihoods[0] = np.log(log_likelihoods[0])
-        for it in range(max_iters):
+
+        it = 0 # most natural way for -1 = infinite loop is this
+        while it != max_iters:
             likelihoods = np.zeros(self.k)
             newpaths = list([0] * self.k)  
             for j in range(self.k):
+                if rand == True:    # use partial sum trick to choose a case
+                                    # when rand == True
+                    sumProbs = list([0])
                 # prob transition from i into j
                 if log == True:
                     probabilities = np.add(np.log(self.A)[j], 
                             log_likelihoods[-1]) + np.log(multiplier[j])
+                    if rand == True:
+                        newprobs = probabilities - max(probabilities)
+                        for p in newprobs:
+                            sumProbs.append(sumProbs[-1] + np.exp(p))
                 else:
                     probabilities = np.multiply(self.A[j], 
                             log_likelihoods[-1]) * multiplier[j]
-                index = probabilities.argmax()  # argmax_i P(i -> j)
+                    if rand == True:
+                        newprobs = np.zeros(len(probabilities))\
+                                if probabilities.sum() < np.sqrt(ZERO)\
+                                else probabilities / probabilities.sum()
+                        for p in newprobs:
+                            sumProbs.append(sumProbs[-1] + p)
+                if rand == False:
+                    index = probabilities.argmax()  # argmax_i P(i -> j)
+                else:
+                    r = random.random() * sumProbs[-1]
+                    if all(np.array(sumProbs) == 0):
+                        index = 0
+                    else:
+                        index = bisect.bisect(sumProbs, r) - 1
                 # store likelihood, path for maximum
                 likelihoods[j] = probabilities[index]
                 newpaths[j] = paths[index] + [j]
             if log == True:
-                log_likelihoods.append(likelihoods)
+                if renorm == True:
+                    log_likelihoods.append(likelihoods - max(likelihoods))
+                else:
+                    log_likelihoods.append(likelihoods)
             else:
-                log_likelihoods.append(likelihoods / sum(likelihoods))
+                if renorm == True:
+                    log_likelihoods.append(likelihoods / sum(likelihoods))
+                else:
+                    log_likelihoods.append(likelihoods)
             paths = newpaths
+            it += 1
         index = log_likelihoods[-1].argmax()
         return log_likelihoods[-1][index], paths[index]
     def calcA(self, seq):
@@ -240,8 +274,8 @@ class HMM(object):
                 A[state2, state1] = num / den
         resA = np.sqrt(((self.A - A)**2).sum())
         resO = np.sqrt(((self.O - O)**2).sum())
-        self.A = A
-        self.O = O
+        self.setA(A)
+        self.setO(O)
         return resA, resO
     def learn(self, seqs, tol=0.01):
         """

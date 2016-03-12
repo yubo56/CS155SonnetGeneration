@@ -90,9 +90,36 @@ if __name__ == '__main__':
     # EM
     k=2
     testHMM = HMM(4, fromtoken, totoken, k=k)
-    print(testHMM.learn(dat, tol=0.001))
-    print(testHMM.A)
-    print(testHMM.O)
+    testHMM.learn(dat, tol=0.001)
+    test(testHMM.A.round(3).tolist() == [[0.0, 0.0, 0.0, 0.0], 
+        [0.5, 0.389, 0.389, 0.0], 
+        [0.5, 0.389, 0.389, 0.0], 
+        [0.0, 0.222, 0.222, 1.0]],
+        "A matrix correct",
+        "A matrix incorrect",
+        numTests,
+        lambda : print(testHMM.A.round(3).tolist()))
+    # O is not deterministic up to column shift, compare determinants
+    test(abs(np.linalg.det(testHMM.O.round(3).tolist())) == 
+            abs(np.linalg.det([[1.0, 0.0, 0.0, 0.0], 
+            [0.0, 0.5, 0.0, 0.5],
+            [0.0, 0.5, 0.0, 0.5], 
+            [0.0, 0.389, 0.223, 0.389]])),
+        "O matrix determinant correct",
+        "O matrix determinant incorrect",
+        numTests,
+        lambda : print(testHMM.O.round(3).tolist()))
+    print('\nRETESTING VITERBI')
+    # Unsupervised prediction using Viterbi
+    test(testHMM.predict(max_iters = 10, log=True, multiplier=[1,1,1,0])[1]
+            == [0] + [1] * 10,
+            "Deterministic Viterbi correct",
+            "Deterministic Viterbi incorrect",
+            numTests)
+    print("Random Viterbi Test, should oscillate 1-2")
+    for i in range(5):
+        print(testHMM.predict(max_iters = 10, rand=True, log=True,
+            multiplier=[1,1,1,0])[1])
 
     print('\n' + str(int(numTests[0])) + " tests out of " + 
             str(int(numTests[1])) + " tests passed!")
