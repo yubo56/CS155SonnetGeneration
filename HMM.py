@@ -191,47 +191,64 @@ class HMM(object):
                     np.multiply(self.O[:, seq[-z]],b[-z]))
             b[-z - 1] /= b[-z - 1].sum()
         return b
-    def EM(self, seq):
+    def EM(self, seqs):
         """
         performs expectation-maximization
         Input:
-            seq - M-length input sequence, already fromtoken'd
+            seqs - list of input sequences, already fromtoken'd
         Output:
             resA, resO - Frobenius norms of newA - A, newO - O
         """
         A = np.zeros(self.A.shape)
         O = np.zeros(self.O.shape)
-        alpha = self.calcA(seq)
-        beta = self.calcB(seq)
+        alphas = list()             # cache computation of a, b to save time
+        betas = list()
 
         # O update rule
         for state in range(self.k):
             for token in range(self.N):
                 num = 0
                 den = 0
-                for i, z in enumerate(seq):
-                    marginal = alpha[i, state] * beta[i, state] /\
-                            np.dot(alpha[i], beta[i])
-                    if z == token:
-                        num += marginal
-                    den += marginal
+                for seq in seqs:
+                    alpha = self.calcA(seq)
+                    beta = self.calcB(seq)
+                    alphas.append(alpha)
+                    betas.append(beta)
+                    for i, z in enumerate(seq):
+                        marginal = alpha[i, state] * beta[i, state] /\
+                                np.dot(alpha[i], beta[i])
+                        if z == token:
+                            num += marginal
+                        den += marginal
                 O[state, token] = num / den
         # A update rule
         for state1 in range(self.k):
             for state2 in range(self.k):
                 num = 0
                 den = 0
-                for i, z in enumerate(seq[1:]):
-                    # num is properly normalized, sums to 1 over states
-                    num += alpha[i, state1] * beta[i + 1, state2] * \
-                            self.A[state2, state1] * self.O[state2, z] / \
-                            np.dot(np.dot(self.A, alpha[i]), np.multiply(
-                                beta[i + 1], np.transpose(self.O)[z]))
-                    den += alpha[i, state1] * beta[i, state1] /\
-                            np.dot(alpha[i], beta[i])
+                for s, seq in enumerate(seqs):
+                    alpha = alphas[s]
+                    beta = betas[s]
+                    for i, z in enumerate(seq[1:]):
+                        # num is properly normalized, sums to 1 over states
+                        num += alpha[i, state1] * beta[i + 1, state2] * \
+                                self.A[state2, state1] * self.O[state2, z] / \
+                                np.dot(np.dot(self.A, alpha[i]), np.multiply(
+                                    beta[i + 1], np.transpose(self.O)[z]))
+                        den += alpha[i, state1] * beta[i, state1] /\
+                                np.dot(alpha[i], beta[i])
                 A[state2, state1] = num / den
         resA = np.sqrt(((self.A - A)**2).sum())
         resO = np.sqrt(((self.O - O)**2).sum())
         self.A = A
         self.O = O
         return resA, resO
+    def learn(self, seqs, tol=0.01):
+        """
+        runs EM until Frobenius norm is within tol / self.k. Default tol =
+        0.01.
+        """
+        resA, resB = self.EM(seqs)
+        while max(resA, resB) > tol / self.k:
+            resA, resB = self.EM(seqs)
+        return resA, resB

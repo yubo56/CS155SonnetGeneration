@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from HMM import *
-def test(a, b, c, numTests):
+def test(a, b, c, numTests, ifFail=None):
     """
     if a is true, print "SUCCESS:" + b 
         else print "ERROR:" + c
@@ -13,6 +13,8 @@ def test(a, b, c, numTests):
     else:
         print("ERROR: " + c)
         numTests += np.array([0, 1])
+        if ifFail != None:
+            ifFail()
 
 if __name__ == '__main__':
     numTests = np.zeros(2)
@@ -72,24 +74,25 @@ if __name__ == '__main__':
     testHMM = HMM(4, fromtoken, totoken, k=k)
     a = testHMM.calcA(dat[0])
     b = testHMM.calcB(dat[0])
-    test((a[0] == [1 if i == fromtoken[STARTSTATE] else 0 
-        for i in range(k+2)]).all() and 
+    # start state is defined at position [0], end at position [-1]
+    test((a[0] == [1] + [0] * (len(b[-1]) - 1)).all() and 
             (a[1: ] == np.zeros([len(a) - 1, k + 2]) + 1 / (k + 2)).all(),
             "Right Alpha",
             "Wrong Alpha",
             numTests)
-    test((b[-1] == [1 if i == fromtoken[EOL] else 0 
-        for i in range(k+2)]).all() and 
+    test((b[-1] == [0.] * (len(b[-1]) - 1) + [1.]).all() and 
             (b[ :-1] == np.zeros([len(b) - 1, k + 2]) + 1 / (k + 2)).all(),
             "Right Beta",
             "Wrong Beta",
-            numTests)
+            numTests,
+            lambda : print(b))
     print('\nTESTING EM')
     # EM
     k=2
     testHMM = HMM(4, fromtoken, totoken, k=k)
-    for i in range(150):
-        print(testHMM.EM(dat[0]))
+    print(testHMM.learn(dat, tol=0.001))
+    print(testHMM.A)
+    print(testHMM.O)
 
     print('\n' + str(int(numTests[0])) + " tests out of " + 
             str(int(numTests[1])) + " tests passed!")
