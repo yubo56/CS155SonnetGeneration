@@ -97,23 +97,18 @@ class HMM(object):
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
-    def predict(self, startindex=0, endindex=-1, log=False, max_iters=-1,
-            multiplier=None, renorm=False, rand=False):
+    def predict(self, startindex=0, endindex=-1, max_iters=-1,
+            multiplier=None, rand=False):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
         Inputs:
             int startindex  - index of start state, default 0
             int endindex    - index of end state, default -1
-            bool log        - use log probabilities to stop overflow
-                                Note: Not very useful if use renorm=True, same
-                                effect
             int max_iters   - max number of tokens to predict before truncating
                                 Default: -1 (no truncation)
             list(float)     - external probability multiplier on tokens
                 multiplier      (possibly from other HMMs). Default: all 1s
-            bool renorm     - whether to renormalize likelihoods at each step
-                                only relevant when not using log probs
             bool rand       - make random choices per probability distribution
                                 instead of random weights
         Outputs:
@@ -127,17 +122,16 @@ class HMM(object):
         else:
             multiplier = np.array(multiplier) + max(0, ZERO - min(multiplier))
 
-        log_likelihoods = list()        # list of k floats, likelihoods at each
+        tot_likelihoods = list()        # list of k floats, likelihoods at each
                                         # step
         paths = list([list([startindex])] * self.k)  
             # list of k paths, paths for each likelihood
 
         # set up starting likelihood
-        log_likelihoods.append(np.zeros(self.k) + ZERO)
-        log_likelihoods[0][startindex] = 1  # start state has 1 probability at
+        tot_likelihoods.append(np.zeros(self.k) + ZERO)
+        tot_likelihoods[0][startindex] = 1  # start state has 1 probability at
                                             # first
-        if log == True:
-            log_likelihoods[0] = np.log(log_likelihoods[0])
+        tot_likelihoods[0] = np.log(tot_likelihoods[0])
 
         it = 0 # most natural way for -1 = infinite loop is this
         while it != max_iters:
@@ -148,22 +142,12 @@ class HMM(object):
                                     # when rand == True
                     sumProbs = list([0])
                 # prob transition from i into j
-                if log == True:
-                    probabilities = np.add(np.log(self.A)[j], 
-                            log_likelihoods[-1]) + np.log(multiplier[j])
-                    if rand == True:
-                        newprobs = probabilities - max(probabilities)
-                        for p in newprobs:
-                            sumProbs.append(sumProbs[-1] + np.exp(p))
-                else:
-                    probabilities = np.multiply(self.A[j], 
-                            log_likelihoods[-1]) * multiplier[j]
-                    if rand == True:
-                        newprobs = np.zeros(len(probabilities))\
-                                if probabilities.sum() < np.sqrt(ZERO)\
-                                else probabilities / probabilities.sum()
-                        for p in newprobs:
-                            sumProbs.append(sumProbs[-1] + p)
+                probabilities = np.add(np.log(self.A)[j], 
+                        tot_likelihoods[-1]) + np.log(multiplier[j])
+                if rand == True:
+                    newprobs = probabilities - max(probabilities)
+                    for p in newprobs:
+                        sumProbs.append(sumProbs[-1] + np.exp(p))
                 if rand == False:
                     index = probabilities.argmax()  # argmax_i P(i -> j)
                 else:
@@ -175,20 +159,11 @@ class HMM(object):
                 # store likelihood, path for maximum
                 likelihoods[j] = probabilities[index]
                 newpaths[j] = paths[index] + [j]
-            if log == True:
-                if renorm == True:
-                    log_likelihoods.append(likelihoods - max(likelihoods))
-                else:
-                    log_likelihoods.append(likelihoods)
-            else:
-                if renorm == True:
-                    log_likelihoods.append(likelihoods / sum(likelihoods))
-                else:
-                    log_likelihoods.append(likelihoods)
+            tot_likelihoods.append(likelihoods)
             paths = newpaths
             it += 1
-        index = log_likelihoods[-1].argmax()
-        return log_likelihoods[-1][index], paths[index]
+        index = tot_likelihoods[-1].argmax()
+        return tot_likelihoods[-1][index], paths[index]
     def calcA(self, seq):
         """
         computes alpha values

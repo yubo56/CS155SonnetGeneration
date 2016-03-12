@@ -18,6 +18,7 @@ def test(a, b, c, numTests, ifFail=None):
 
 if __name__ == '__main__':
     numTests = np.zeros(2)
+    
     print('\nTESTING parseFile()')
     # parseFile()
     tokens, tokenlist = parseFile('data/dummy.txt')
@@ -25,6 +26,7 @@ if __name__ == '__main__':
             "parseFile has correct tokens",
             "parseFile has incorrect tokens",
             numTests)
+    
     print('\nTESTING todict()')
     # todict()
     fromtoken, totoken, dat = todict(tokens, tokenlist)
@@ -37,6 +39,7 @@ if __name__ == '__main__':
             "todict() dicts match",
             "todict() dicts don\'t match",
             numTests)
+
     print('\nTESTING viterbi')
     # viterbi
     k = 2
@@ -53,21 +56,16 @@ if __name__ == '__main__':
     O[fromtoken[EOL], 3] = 1       # each state just emits itself
     testHMM.setO(O)
     prob, seq = testHMM.predict(max_iters=10)
-    problog, seqlog = testHMM.predict(max_iters=10, log=True)
-    test(seqlog == seq,
-            "Viterbi log matches multiply",
-            "Viterbi log fails to match multiply",
-            numTests)
     test(seq == [0, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
             "Viterbi sequence is correct",
             "Viterbi sequence is incorrect",
             numTests)
-    probmult, seqmult = testHMM.predict(max_iters=10, multiplier=[1, 1, 0, 1],
-            log=True)
+    probmult, seqmult = testHMM.predict(max_iters=10, multiplier=[1, 1, 0, 1])
     test(seqmult == [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
             "With multiplier is correct",
             "With multiplier is incorrect",
             numTests)
+    
     print('\nTESTING alpha beta')
     # alphabeta
     k=2
@@ -86,6 +84,7 @@ if __name__ == '__main__':
             "Wrong Beta",
             numTests,
             lambda : print(b))
+
     print('\nTESTING EM')
     # EM
     k=2
@@ -109,16 +108,17 @@ if __name__ == '__main__':
         "O matrix determinant incorrect",
         numTests,
         lambda : print(testHMM.O.round(3).tolist()))
+
     print('\nRETESTING VITERBI')
     # Unsupervised prediction using Viterbi
-    test(testHMM.predict(max_iters = 10, log=True, multiplier=[1,1,1,0])[1]
+    test(testHMM.predict(max_iters = 10, multiplier=[1,1,1,0])[1]
             == [0] + [1] * 10,
             "Deterministic Viterbi correct",
             "Deterministic Viterbi incorrect",
             numTests)
     print("Random Viterbi Test, should oscillate 1-2")
     for i in range(5):
-        print(testHMM.predict(max_iters = 10, rand=True, log=True,
+        print(testHMM.predict(max_iters = 10, rand=True,
             multiplier=[1,1,1,0])[1])
 
     print('\n' + str(int(numTests[0])) + " tests out of " + 
