@@ -110,14 +110,12 @@ class HMM(object):
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
             startemis = np.array([1] + [ZERO] * (self.N - 1))
             endemis = np.zeros(self.N) + ZERO
-            endemis[-1] = 1
+            endemis[self.fromtoken[EOL]] = 1
             self.O[0, :] = startemis
-            self.O[self.fromtoken[EOL], :] = endemis
+            self.O[-1, :] = endemis
             # randomly vary A small-ly while preserving sum(rows) = 1
             # break degeneracies (observed some in testing)
-            for i in range(1, self.k):
-                if i == self.fromtoken[EOL]:
-                    continue
+            for i in range(1, self.k - 1):
                 randarr = np.random.rand(self.N) / (5 * self.k)
                 randarr -= randarr.mean()
                 self.O[i , :] += randarr
@@ -204,20 +202,18 @@ class HMM(object):
             else:
                 index = tot_likelihoods[-1].argmax()
             maxpath = paths[index]
-        # this abstraction is a bit ugly since multiple states can emit EOL
-        # characters...
         if retl:
             return tot_likelihoods[-1][index], maxpath if EOL not in maxpath\
                     else maxpath[ : maxpath.index(EOL) + 1]
         else:
             return maxpath if EOL not in maxpath else \
                     maxpath[ : maxpath.index(EOL) + 1]
-    def toktostr(self, s):
+    def toktostr(self, s, delim=" "):
         """
         turns a sequence of tokens into tokenstring
         """
         # do not convert start state
-        return " ".join(s[1: -1]) + EOL
+        return delim.join(s[1: -1]) + EOL
     def calcA(self, seq):
         """
         computes alpha values
@@ -251,7 +247,7 @@ class HMM(object):
         b[-1, -1] = 1          # start B at end state
         for z in range(1, M):
             b[-z - 1] = np.dot(np.transpose(self.A), 
-                    np.multiply(self.O[:, seq[-z]],b[-z]))
+                    np.multiply(self.O[:, seq[-z]] ,b[-z]))
             b[-z - 1] /= b[-z - 1].sum()
         return b
     def EM(self, seqs):
@@ -268,9 +264,7 @@ class HMM(object):
         betas = list()
 
         # O update rule
-        for state in range(1, self.k):
-            if state == self.fromtoken[EOL]:
-                continue
+        for state in range(1, self.k - 1):
             for token in range(self.N):
                 num = 0
                 den = 0
@@ -284,6 +278,16 @@ class HMM(object):
                         alpha = alphas[s]
                         beta = betas[s]
                     for i, z in enumerate(seq):
+                        if np.dot(alpha[i], beta[i]) == 0:
+                            print(self.A.round(3))
+                            print()
+                            print(self.O.round(3))
+                            print()
+                            print(alpha.round(3))
+                            print()
+                            print(beta.round(3))
+                            print()
+                            exit(0)
                         marginal = alpha[i, state] * beta[i, state] /\
                                 np.dot(alpha[i], beta[i])
                         if z == token:
@@ -300,24 +304,35 @@ class HMM(object):
                     beta = betas[s]
                     for i, z in enumerate(seq[1:]):
                         # num is properly normalized, sums to 1 over states
-                        num += alpha[i, state1] * beta[i + 1, state2] * \
-                                self.A[state2, state1] * self.O[state2, z] / \
-                                np.dot(np.dot(self.A, alpha[i]), np.multiply(
-                                    beta[i + 1], np.transpose(self.O)[z]))
-                        den += alpha[i, state1] * beta[i, state1] /\
-                                np.dot(alpha[i], beta[i])
-                A[state2, state1] = num / den
+                        if np.dot(np.dot(self.A, alpha[i]), np.multiply(
+                                    beta[i + 1], np.transpose(self.O)[z])) == 0:
+                            continue # edge case? if one token not being emitted
+                        else:
+                            num += alpha[i, state1] * beta[i + 1, state2] * \
+                                    self.A[state2, state1] * self.O[state2, z] / \
+                                    np.dot(np.dot(self.A, alpha[i]), np.multiply(
+                                        beta[i + 1], np.transpose(self.O)[z]))
+                            den += alpha[i, state1] * beta[i, state1] /\
+                                    np.dot(alpha[i], beta[i])
+                A[state2, state1] = 0 if den == 0 else num / den
         resA = np.sqrt(((self.A - A)**2).sum())
         resO = np.sqrt(((self.O - O)**2).sum())
         self.setA(A)
         self.setO(O)
         return resA, resO
-    def learn(self, seqs, tol=0.003):
+    def learn(self, seqs, tol=0.003, max_iter=200):
         """
         runs EM until Frobenius norm is within tol / self.k. Default tol =
         0.01.
+        Inputs:
+            seq - same input to EM
+            tol - threshold
+            max_iter - maximum number of iterations to run EM, in case not
+                    converging. default: 50
         """
         resA, resB = self.EM(seqs)
-        while max(resA, resB) > tol / self.k:
+        it = 0
+        while max(resA, resB) > tol / self.k and it < max_iter:
             resA, resB = self.EM(seqs)
+            it += 1
         return resA, resB
