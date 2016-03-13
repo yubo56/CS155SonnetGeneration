@@ -95,7 +95,7 @@ class HMM(object):
             # randomly vary A small-ly while preserving sum(columns) = 1
             # break degeneracies (observed some in testing)
             for i in range(1, self.k - 1):
-                randarr = np.random.rand(self.k - 1) / 1000
+                randarr = np.random.rand(self.k - 1) / (5 * self.k)
                 randarr -= randarr.mean()
                 self.A[1: , i] += randarr
         else:
@@ -108,17 +108,19 @@ class HMM(object):
         """
         if O is None:
             self.O = np.zeros([self.k, self.N]) + 1.0 / self.k
-            startemis = np.array([1] + [ZERO] * (self.k - 1))
-            endemis = np.zeros(self.k) + ZERO
-            endemis[self.fromtoken[EOL]] = 1
-            self.O[:, 0] = startemis
-            self.O[:, -1] = endemis
-            # randomly vary A small-ly while preserving sum(columns) = 1
+            startemis = np.array([1] + [ZERO] * (self.N - 1))
+            endemis = np.zeros(self.N) + ZERO
+            endemis[-1] = 1
+            self.O[0, :] = startemis
+            self.O[self.fromtoken[EOL], :] = endemis
+            # randomly vary A small-ly while preserving sum(rows) = 1
             # break degeneracies (observed some in testing)
-            for i in range(1, self.N - 2):
-                randarr = np.random.rand(self.k) / 1000
+            for i in range(1, self.k):
+                if i == self.fromtoken[EOL]:
+                    continue
+                randarr = np.random.rand(self.N) / (5 * self.k)
                 randarr -= randarr.mean()
-                self.O[: , i] += randarr
+                self.O[i , :] += randarr
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
     def predict(self, max_iters=-1,
@@ -165,32 +167,42 @@ class HMM(object):
             likelihoods = np.zeros(self.k)
             newpaths = list([0] * self.k)  
             for j in range(self.k):
-                if rand == True:    # use partial sum trick to choose a case
-                                    # when rand == True
-                    sumProbs = list([0])
                 # prob transition from i into j
                 probabilities = np.add(np.log(self.A)[j], 
                         tot_likelihoods[-1]) + np.log(multiplier[j])
-                if rand == True:
+                if rand == True:    # use partial sum trick to choose a case
+                                    # when rand == True
+                    sumProbs = list([0])
                     newprobs = probabilities - max(probabilities)
                     for p in newprobs:
                         sumProbs.append(sumProbs[-1] + np.exp(p))
-                if rand == False:
-                    index = probabilities.argmax()  # argmax_i P(i -> j)
-                else:
                     r = np.random.rand() * sumProbs[-1]
                     if all(np.array(sumProbs) == 0):
                         index = 0
                     else:
                         index = bisect.bisect(sumProbs, r) - 1
+                else:
+                    index = probabilities.argmax()  # argmax_i P(i -> j)
                 # store likelihood, path for maximum
                 likelihoods[j] = probabilities[index]
                 newpaths[j] = paths[index] + [j]
             tot_likelihoods.append(likelihoods)
             paths = newpaths
             it += 1
-            index = tot_likelihoods[-1].argmax()
-            maxpath = paths[index]
+            if rand == True:
+                newprobs = tot_likelihoods[-1] - max(tot_likelihoods[-1])
+                sumProbs = list([0])
+                for p in newprobs:
+                    sumProbs.append(sumProbs[-1] + np.exp(p))
+                r = np.random.rand() * sumProbs[-1]
+                index = bisect.bisect(sumProbs, r) - 1
+            else:
+                index = tot_likelihoods[-1].argmax()
+            try:
+                maxpath = paths[index]
+            except IndexError:
+                print(sumProbs, index, r)
+                exit(0)
         # this abstraction is a bit ugly since multiple states can emit EOL
         # characters...
         if retl:
@@ -204,6 +216,8 @@ class HMM(object):
         turns a sequence of labels into tokens using self.totoken
         """
         # do not convert start state
+        print(s)
+        print(self.totoken)
         return " ".join([self.totoken[c] for c in s[1: ]])
     def calcA(self, seq):
         """
@@ -249,21 +263,27 @@ class HMM(object):
         Output:
             resA, resO - Frobenius norms of newA - A, newO - O
         """
-        A = np.zeros(self.A.shape)
-        O = np.zeros(self.O.shape)
+        A = np.array(self.A)
+        O = np.array(self.O)
         alphas = list()             # cache computation of a, b to save time
         betas = list()
 
         # O update rule
-        for state in range(self.k):
+        for state in range(1, self.k):
+            if state == self.fromtoken[EOL]:
+                continue
             for token in range(self.N):
                 num = 0
                 den = 0
-                for seq in seqs:
-                    alpha = self.calcA(seq)
-                    beta = self.calcB(seq)
-                    alphas.append(alpha)
-                    betas.append(beta)
+                for s, seq in enumerate(seqs):
+                    if len(alphas) != len(seqs): # not yet precomputed
+                        alpha = self.calcA(seq)
+                        beta = self.calcB(seq)
+                        alphas.append(alpha)
+                        betas.append(beta)
+                    else:
+                        alpha = alphas[s]
+                        beta = betas[s]
                     for i, z in enumerate(seq):
                         marginal = alpha[i, state] * beta[i, state] /\
                                 np.dot(alpha[i], beta[i])
@@ -272,8 +292,8 @@ class HMM(object):
                         den += marginal
                 O[state, token] = num / den
         # A update rule
-        for state1 in range(self.k):
-            for state2 in range(self.k):
+        for state1 in range(self.k - 1):
+            for state2 in range(1, self.k):
                 num = 0
                 den = 0
                 for s, seq in enumerate(seqs):
@@ -293,7 +313,7 @@ class HMM(object):
         self.setA(A)
         self.setO(O)
         return resA, resO
-    def learn(self, seqs, tol=0.01):
+    def learn(self, seqs, tol=0.003):
         """
         runs EM until Frobenius norm is within tol / self.k. Default tol =
         0.01.

@@ -17,6 +17,7 @@ def test(a, b, c, numTests, ifFail=None):
             ifFail()
 
 if __name__ == '__main__':
+    k=2
     numTests = np.zeros(2)
     
     print('\nTESTING parseFile()')
@@ -42,7 +43,6 @@ if __name__ == '__main__':
 
     print('\nTESTING viterbi')
     # viterbi
-    k = 2
     testHMM = HMM(4, fromtoken, totoken, k=k)
     testHMM.setA(np.array(
         [[0, 0, 0, 0],
@@ -73,8 +73,10 @@ if __name__ == '__main__':
             numTests,
             lambda : print(seqmult))
     
+    ################################################################
+    ############# deprecated b/c random seeds for A, O now #########
+    ################################################################
     # alphabeta
-    k=2
     # print('\nTESTING alpha beta')
     # testHMM = HMM(4, fromtoken, totoken, k=k)
     # a = testHMM.calcA(dat[0])
@@ -95,8 +97,8 @@ if __name__ == '__main__':
     #         numTests,
     #         lambda : print(b))
 
-    print('\nTESTING EM')
     # EM
+    # int('\nTESTING EM')
     # A is not deterministic up to column shift, compare determinants
     # testHMM = HMM(4, fromtoken, totoken, k=k)
     # testHMM.learn(dat, tol=0.001)
@@ -119,6 +121,9 @@ if __name__ == '__main__':
     #     "O matrix determinant incorrect",
     #     numTests,
     #     lambda : print(testHMM.O.round(3)))
+    ################################################################
+    ############# deprecated b/c random seeds for A, O now #########
+    ################################################################
 
     print('\nRETESTING VITERBI')
     # Unsupervised prediction using Viterbi
@@ -126,14 +131,16 @@ if __name__ == '__main__':
     testHMM.learn(dat, tol=0.001)
     predseq = testHMM.predict()
     test(len(predseq) == 3 and predseq[0] == 0
-            and predseq[2] == fromtoken[EOL],
+            and predseq[2] == (k + 2) - 1,
             "Deterministic Viterbi correct",
             "Deterministic Viterbi incorrect",
             numTests,
             lambda : print(predseq))
-    # print("Random Viterbi Test, should oscillate 1-2")
-    # for i in range(5):
-    #     print(testHMM.predict(rand=True))
+    print("Random Viterbi Test, should oscillate 1-2 (sometimes fails," +
+            "this is a tricky setup!)")
+    for i in range(5):
+        teststr = testHMM.predict(rand=True)
+        print(testHMM.totokens(teststr))
 
     print('\nTESTING DUMMY1')
     # Unsupervised prediction on new dummy file
@@ -141,10 +148,10 @@ if __name__ == '__main__':
     fromt, tot, ll = todict(s, l)
     dummy1 = HMM(4, fromt, tot, k=2)
     dummy1.learn(ll)
-    print(dummy1.A.round(3))
-    print(dummy1.O.round(3))
-    print(tot)
-    print(dummy1.predict(max_iters=5, rand = True))
+    print("Short prediction, should oscillate")
+    print(dummy1.predict(max_iters=30))
+    print("Long prediction, should prefer to terminate")
+    print(dummy1.predict(max_iters=150))
 
     print('\n' + str(int(numTests[0])) + " tests out of " + 
             str(int(numTests[1])) + " tests passed!")
