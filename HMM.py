@@ -20,12 +20,13 @@ def parseFile(FN, delim=" "):
     tokenlist = list()
     f = open(FN, 'r')
     for l in f.readlines():
+        l = l.strip(".,?!'\"")
         line = l.split(delim)   # split by delim
         for i in line:
-            tokens.add(i.strip())
+            tokens.add(i.strip().lower())
         tokens.add(EOL)         # manually add EOL since dropped by strip
         tokenlist.append([STARTSTATE] + 
-                [i.strip() for i in line] + 
+                [i.strip().lower() for i in line] + 
                 [EOL])
     return tokens, tokenlist
 
@@ -320,7 +321,7 @@ class HMM(object):
         self.setA(A)
         self.setO(O)
         return resA, resO
-    def learn(self, seqs, tol=0.003, max_iter=200):
+    def learn(self, seqs, tol=0.003, max_iter=200, prt=False):
         """
         runs EM until Frobenius norm is within tol / self.k. Default tol =
         0.01.
@@ -329,10 +330,43 @@ class HMM(object):
             tol - threshold
             max_iter - maximum number of iterations to run EM, in case not
                     converging. default: 50
+            prt - whether to print each iteration for debugging
         """
         resA, resB = self.EM(seqs)
         it = 0
         while max(resA, resB) > tol / self.k and it < max_iter:
             resA, resB = self.EM(seqs)
+            if prt:
+                print(it, (round(resA, 3), round(resB, 3)))
             it += 1
         return resA, resB
+    def gettops(self, numWords=5, thresh=1e-10, unique=True):
+        """
+        returns words that correspond to top numWords weights for each latent
+        state.
+        Input:
+            numWords - number of words to list for each latent state. Default: 5
+            thresh - emission probability beyond which not considered top.
+                    Default: 1e-10
+            unique - so each token can only be assigned to one latent state
+        Output:
+            list(list(str)) - list of list of top numWords words for each token
+        """
+        O = np.array(self.O)
+        if unique:
+            for i in range(self.N):
+                arr = np.zeros(self.k)
+                arr[O[:, i].argmax()] = O[:, i].max()
+                O[:, i] = arr
+        l = list()
+        for i in range(self.k):
+            ranks = list(zip(O[i,:], range(self.N)))
+            ranks.sort()
+            ranks.reverse()
+            lst = list()
+            for i in ranks[:numWords]:
+                if i[0] > thresh: # only add if it has a reasonable emission
+                                  # probability
+                    lst.append(self.totoken[i[1]])
+            l.append(lst)
+        return l
