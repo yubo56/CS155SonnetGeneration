@@ -152,7 +152,7 @@ class HMM(object):
 
         tot_likelihoods = list()        # list of k floats, likelihoods at each
                                         # step
-        paths = list([list([startindex])] * self.k)  
+        paths = list([list([STARTSTATE])] * self.k)  
             # list of k paths, paths for each likelihood
 
         # set up starting likelihood
@@ -163,7 +163,7 @@ class HMM(object):
 
         it = 0 # most natural way for -1 = infinite loop is this
         maxpath = paths[0]
-        while it != max_iters and maxpath[-1] != self.k - 1:
+        while it != max_iters and maxpath[-1] != EOL:
             likelihoods = np.zeros(self.k)
             newpaths = list([0] * self.k)  
             for j in range(self.k):
@@ -176,16 +176,21 @@ class HMM(object):
                     newprobs = probabilities - max(probabilities)
                     for p in newprobs:
                         sumProbs.append(sumProbs[-1] + np.exp(p))
-                    r = np.random.rand() * sumProbs[-1]
                     if all(np.array(sumProbs) == 0):
                         index = 0
                     else:
-                        index = bisect.bisect(sumProbs, r) - 1
+                        index = bisect.bisect(sumProbs, 
+                                np.random.rand() * sumProbs[-1]) - 1
                 else:
                     index = probabilities.argmax()  # argmax_i P(i -> j)
                 # store likelihood, path for maximum
                 likelihoods[j] = probabilities[index]
-                newpaths[j] = paths[index] + [j]
+                if rand == True:
+                    ind_token = bisect.bisect(np.cumsum(self.O[j, :]), 
+                            np.random.rand())
+                else:
+                    ind_token = self.O[j, :].argmax()
+                newpaths[j] = paths[index] + [self.totoken[ind_token]]
             tot_likelihoods.append(likelihoods)
             paths = newpaths
             it += 1
@@ -198,27 +203,21 @@ class HMM(object):
                 index = bisect.bisect(sumProbs, r) - 1
             else:
                 index = tot_likelihoods[-1].argmax()
-            try:
-                maxpath = paths[index]
-            except IndexError:
-                print(sumProbs, index, r)
-                exit(0)
+            maxpath = paths[index]
         # this abstraction is a bit ugly since multiple states can emit EOL
         # characters...
         if retl:
-            return tot_likelihoods[-1][index], maxpath if endindex not in maxpath\
-                    else maxpath[ : maxpath.index(endindex) + 1]
+            return tot_likelihoods[-1][index], maxpath if EOL not in maxpath\
+                    else maxpath[ : maxpath.index(EOL) + 1]
         else:
-            return maxpath if endindex not in maxpath else \
-                    maxpath[ : maxpath.index(endindex) + 1]
-    def totokens(self, s):
+            return maxpath if EOL not in maxpath else \
+                    maxpath[ : maxpath.index(EOL) + 1]
+    def toktostr(self, s):
         """
-        turns a sequence of labels into tokens using self.totoken
+        turns a sequence of tokens into tokenstring
         """
         # do not convert start state
-        print(s)
-        print(self.totoken)
-        return " ".join([self.totoken[c] for c in s[1: ]])
+        return " ".join(s[1: -1]) + EOL
     def calcA(self, seq):
         """
         computes alpha values
