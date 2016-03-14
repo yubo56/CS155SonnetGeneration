@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # Implementation of HMM for sonnet generation
 import numpy as np
-ZERO = 1e-323                   # add to everything to make sure no log(0)'s
+ZERO = 1e-300                   # add to everything to make sure no log(0)'s
 STARTSTATE = ''                 # start state
 EOL = '\n'
 import bisect                   # for random prediction
@@ -20,7 +20,8 @@ def parseFile(FN, delim=" "):
     tokenlist = list()
     f = open(FN, 'r')
     for l in f.readlines():
-        l = l.strip(".,?!'\"")
+        for i in ".,?!'\"":
+            l = l.replace(i, '')
         line = l.split(delim)   # split by delim
         for i in line:
             tokens.add(i.strip().lower())
@@ -122,21 +123,17 @@ class HMM(object):
                 self.O[i , :] += randarr
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
-    def predict(self, max_iters=-1, mult_state=None, rand=False,
-            retl=False):
+    def predict(self, rand=False, retl=False):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
         Inputs:
             int max_iters   - max number of tokens to predict before truncating
                                 Default: -1 (no truncation)
-            list(float)     - external probability multiplier on tokens
-                mult_state      (possibly from other HMMs). Default: all 1s
             bool rand       - make random choices per probability distribution
                                 instead of random weights
             bool retl       - whether to return log-likelihood. Default False
         Outputs:
-            float           - probability
             list(int)       - maximum probability sequence, in state number
         """
         startindex = 0
@@ -144,12 +141,12 @@ class HMM(object):
 
         if self.A is None or self.O is None:
             raise ValueError("A or O is None")
-        if mult_state is None:
-            mult_state = np.array([1] * self.k)
-        else:
-            mult_state = np.array(mult_state) + max(0, ZERO - min(mult_state))
-
-        mult_emis = np.array([1] * self.k)
+        mult_state = np.array([1.0] * self.k)
+        mult_emis = np.array([1.0] * self.N)
+        # multiplier to force emission to '|'
+        mult_emis_bar = np.zeros(self.N)
+        mult_emis_bar[self.fromtoken['|']] = 1 - ZERO
+        mult_state[-1] = ZERO # do not permit emission of EOL
 
         tot_likelihoods = list()        # list of k floats, likelihoods at each
                                         # step
@@ -162,13 +159,18 @@ class HMM(object):
                                             # first
         tot_likelihoods[0] = np.log(tot_likelihoods[0])
 
-        it = 0 # most natural way for -1 = infinite loop is this
         maxpath = paths[0]
-        while it != max_iters and maxpath[-1] != EOL:
+        numWords = 8        # approx 10 syllables right?
+        numLines = 14       # total number of lines
+        for l in range(numLines):
+            for w in range(numWords):
+                # print out anything but bar or EOL
+                index = self._predhelper(tot_likelihoods, paths, mult_state,
+                        mult_emis - mult_emis_bar, rand)
+            # force print bar
             index = self._predhelper(tot_likelihoods, paths, mult_state,
-                    mult_emis, rand)
-            maxpath = paths[index]
-            it += 1
+                    mult_emis_bar, rand)
+        maxpath = paths[index]
         if retl:
             return tot_likelihoods[-1][index], maxpath if EOL not in maxpath\
                     else maxpath[ : maxpath.index(EOL) + 1]
@@ -176,6 +178,7 @@ class HMM(object):
             return maxpath if EOL not in maxpath else \
                     maxpath[ : maxpath.index(EOL) + 1]
     def _predhelper(self, tot_likelihoods, paths, mult_state, mult_emis, rand):
+        O = np.multiply(np.array(self.O), mult_emis)
         likelihoods = np.zeros(self.k)
         newpaths = list([0] * self.k)
         for j in range(self.k):
@@ -184,24 +187,22 @@ class HMM(object):
                     tot_likelihoods[-1]) + np.log(mult_state[j])
             if rand == True:    # use partial sum trick to choose a case
                                 # when rand == True
-                sumProbs = list([0])
                 newprobs = probabilities - max(probabilities)
-                for p in newprobs:
-                    sumProbs.append(sumProbs[-1] + np.exp(p))
-                if all(np.array(sumProbs) == 0):
+                sumProbs = np.cumsum(np.exp(newprobs))
+                if all(np.array(sumProbs) <= np.sqrt(ZERO)):
                     index = 0
                 else:
                     index = bisect.bisect(sumProbs,
-                            np.random.rand() * sumProbs[-1]) - 1
+                            np.random.rand() * sumProbs[-1])
             else:
                 index = probabilities.argmax()  # argmax_i P(i -> j)
             # store likelihood, path for maximum
             likelihoods[j] = probabilities[index]
             if rand == True:
-                ind_token = bisect.bisect(np.cumsum(self.O[j, :]),
-                        np.random.rand() * sum(self.O[j, :]))
+                ind_token = bisect.bisect(np.cumsum(O[j, :]),
+                        np.random.rand() * sum(O[j, :]))
             else:
-                ind_token = self.O[j, :].argmax()
+                ind_token = O[j, :].argmax()
             newpaths[j] = paths[index] + [self.totoken[ind_token]]
         tot_likelihoods.append(likelihoods)
         for i in range(len(paths)):
@@ -221,7 +222,28 @@ class HMM(object):
         turns a sequence of tokens into tokenstring
         """
         # do not convert start state
-        return delim.join(s[1: -1]) + EOL
+        caps = True
+        toSpace = False
+        ret = ""
+        for tok in s[1: ]: # drop start state
+            if tok == '|':
+                caps = True
+                toSpace = False
+                ret += ',\n'
+            elif tok == '\n':
+                ret[-2] = '.' # just need to change the previous comma (from
+                              # '|') into a period!
+            else:
+                if caps:
+                    tok = tok.title()
+                    caps = False
+                tok = tok.strip(".,?!") # for some reason had some stragglers
+                if toSpace:
+                    ret += ' ' + tok
+                else:
+                    ret += tok
+                    toSpace = True
+        return ret
     def calcA(self, seq):
         """
         computes alpha values
