@@ -122,8 +122,8 @@ class HMM(object):
                 self.O[i , :] += randarr
         else:
             self.O = np.array(O) + max(0, ZERO - O.min())
-    def predict(self, max_iters=-1,
-            multiplier=None, rand=False, retl=False):
+    def predict(self, max_iters=-1, mult_state=None, rand=False,
+            retl=False):
         """
         Runs Viterbi and predicts max sequence
         A_ij = prob transition from i to j
@@ -131,7 +131,7 @@ class HMM(object):
             int max_iters   - max number of tokens to predict before truncating
                                 Default: -1 (no truncation)
             list(float)     - external probability multiplier on tokens
-                multiplier      (possibly from other HMMs). Default: all 1s
+                mult_state      (possibly from other HMMs). Default: all 1s
             bool rand       - make random choices per probability distribution
                                 instead of random weights
             bool retl       - whether to return log-likelihood. Default False
@@ -144,10 +144,12 @@ class HMM(object):
 
         if self.A is None or self.O is None:
             raise ValueError("A or O is None")
-        if multiplier is None:
-            multiplier = np.array([1] * self.k)
+        if mult_state is None:
+            mult_state = np.array([1] * self.k)
         else:
-            multiplier = np.array(multiplier) + max(0, ZERO - min(multiplier))
+            mult_state = np.array(mult_state) + max(0, ZERO - min(mult_state))
+
+        mult_emis = np.array([1] * self.k)
 
         tot_likelihoods = list()        # list of k floats, likelihoods at each
                                         # step
@@ -163,52 +165,57 @@ class HMM(object):
         it = 0 # most natural way for -1 = infinite loop is this
         maxpath = paths[0]
         while it != max_iters and maxpath[-1] != EOL:
-            likelihoods = np.zeros(self.k)
-            newpaths = list([0] * self.k)  
-            for j in range(self.k):
-                # prob transition from i into j
-                probabilities = np.add(np.log(self.A)[j], 
-                        tot_likelihoods[-1]) + np.log(multiplier[j])
-                if rand == True:    # use partial sum trick to choose a case
-                                    # when rand == True
-                    sumProbs = list([0])
-                    newprobs = probabilities - max(probabilities)
-                    for p in newprobs:
-                        sumProbs.append(sumProbs[-1] + np.exp(p))
-                    if all(np.array(sumProbs) == 0):
-                        index = 0
-                    else:
-                        index = bisect.bisect(sumProbs, 
-                                np.random.rand() * sumProbs[-1]) - 1
-                else:
-                    index = probabilities.argmax()  # argmax_i P(i -> j)
-                # store likelihood, path for maximum
-                likelihoods[j] = probabilities[index]
-                if rand == True:
-                    ind_token = bisect.bisect(np.cumsum(self.O[j, :]), 
-                            np.random.rand())
-                else:
-                    ind_token = self.O[j, :].argmax()
-                newpaths[j] = paths[index] + [self.totoken[ind_token]]
-            tot_likelihoods.append(likelihoods)
-            paths = newpaths
-            it += 1
-            if rand == True:
-                newprobs = tot_likelihoods[-1] - max(tot_likelihoods[-1])
-                sumProbs = list([0])
-                for p in newprobs:
-                    sumProbs.append(sumProbs[-1] + np.exp(p))
-                r = np.random.rand() * sumProbs[-1]
-                index = bisect.bisect(sumProbs, r) - 1
-            else:
-                index = tot_likelihoods[-1].argmax()
+            index = self._predhelper(tot_likelihoods, paths, mult_state,
+                    mult_emis, rand)
             maxpath = paths[index]
+            it += 1
         if retl:
             return tot_likelihoods[-1][index], maxpath if EOL not in maxpath\
                     else maxpath[ : maxpath.index(EOL) + 1]
         else:
             return maxpath if EOL not in maxpath else \
                     maxpath[ : maxpath.index(EOL) + 1]
+    def _predhelper(self, tot_likelihoods, paths, mult_state, mult_emis, rand):
+        likelihoods = np.zeros(self.k)
+        newpaths = list([0] * self.k)
+        for j in range(self.k):
+            # prob transition from i into j
+            probabilities = np.add(np.log(self.A)[j],
+                    tot_likelihoods[-1]) + np.log(mult_state[j])
+            if rand == True:    # use partial sum trick to choose a case
+                                # when rand == True
+                sumProbs = list([0])
+                newprobs = probabilities - max(probabilities)
+                for p in newprobs:
+                    sumProbs.append(sumProbs[-1] + np.exp(p))
+                if all(np.array(sumProbs) == 0):
+                    index = 0
+                else:
+                    index = bisect.bisect(sumProbs,
+                            np.random.rand() * sumProbs[-1]) - 1
+            else:
+                index = probabilities.argmax()  # argmax_i P(i -> j)
+            # store likelihood, path for maximum
+            likelihoods[j] = probabilities[index]
+            if rand == True:
+                ind_token = bisect.bisect(np.cumsum(self.O[j, :]),
+                        np.random.rand() * sum(self.O[j, :]))
+            else:
+                ind_token = self.O[j, :].argmax()
+            newpaths[j] = paths[index] + [self.totoken[ind_token]]
+        tot_likelihoods.append(likelihoods)
+        for i in range(len(paths)):
+            paths[i] = newpaths[i]
+        if rand == True:
+            newprobs = tot_likelihoods[-1] - max(tot_likelihoods[-1])
+            sumProbs = list([0])
+            for p in newprobs:
+                sumProbs.append(sumProbs[-1] + np.exp(p))
+            r = np.random.rand() * sumProbs[-1]
+            index = bisect.bisect(sumProbs, r) - 1
+        else:
+            index = tot_likelihoods[-1].argmax()
+        return index
     def toktostr(self, s, delim=" "):
         """
         turns a sequence of tokens into tokenstring
